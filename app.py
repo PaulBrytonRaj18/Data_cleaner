@@ -65,7 +65,6 @@ def cleaning():
         action = request.form.get('action')
         target = request.form.get('target')
 
-        # Map form actions to engine strategies
         success = False
         msg = ""
 
@@ -95,13 +94,71 @@ def cleaning():
     return render_template('cleaning.html', columns=columns, numeric_columns=numeric_columns)
 
 
+# --- NEW ROUTE FOR TRANSFORMATION (MAPPING & RENAMING) ---
+@app.route('/transform', methods=['GET', 'POST'])
+def transform():
+    if engine.df is None:
+        return redirect(url_for('index'))
+
+    columns = engine.df.columns.tolist()
+    unique_values = []
+    selected_col_for_map = None
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+
+        if action == 'rename':
+            old_name = request.form.get('old_name')
+            new_name = request.form.get('new_name')
+            success, msg = engine.rename_column(old_name, new_name)
+            if success:
+                flash(msg, 'success')
+                return redirect(url_for('transform'))
+            else:
+                flash(msg, 'danger')
+
+        elif action == 'fetch_values':
+            # User selected a column to map, show its values
+            selected_col_for_map = request.form.get('target_col')
+            unique_values = engine.get_column_unique_values(selected_col_for_map)
+            if not unique_values:
+                flash(f"Could not fetch unique values for {selected_col_for_map} (or too many unique values).",
+                      'warning')
+
+        elif action == 'apply_mapping':
+            # User submitted the mapping form
+            target_col = request.form.get('target_col')
+
+            # Construct mapping dictionary from form data
+            mapping_dict = {}
+            # We iterate through keys starting with 'map_'
+            for key, value in request.form.items():
+                if key.startswith('map_origin_'):
+                    origin_val = key.replace('map_origin_', '')
+                    # If value is empty, we skip or map to 0? Let's assume user input is required.
+                    if value.strip() != '':
+                        mapping_dict[origin_val] = value
+
+            success, msg = engine.map_column_values(target_col, mapping_dict)
+            if success:
+                flash(msg, 'success')
+                return redirect(url_for('transform'))  # Reset state
+            else:
+                flash(msg, 'danger')
+
+    return render_template('transform.html',
+                           columns=columns,
+                           selected_col_for_map=selected_col_for_map,
+                           unique_values=unique_values)
+
+
 @app.route('/visualize', methods=['GET', 'POST'])
 def visualize():
     if engine.df is None:
         return redirect(url_for('index'))
 
-    plot_content = None  # Generic name for plot output (image or HTML)
-    is_interactive = False  # Flag to determine if it's an interactive Plotly HTML chart
+    plot_content = None
+    is_interactive = False
 
     columns = engine.df.columns.tolist()
     numeric_columns = engine.df.select_dtypes(include=['float64', 'int64']).columns.tolist()
@@ -114,12 +171,10 @@ def visualize():
         color_col = request.form.get('color_col')
         theme = request.form.get('theme')
 
-        # Treat "None" strings as actual None
         if y_col == "None": y_col = None
         if z_col == "None": z_col = None
         if color_col == "None": color_col = None
 
-        # Updated call: Expecting 3 return values (content, message, is_interactive)
         content, msg, is_html = engine.visualize(plot_type, x_col, y_col, z_col, color_col, theme=theme)
 
         if content:
@@ -131,8 +186,8 @@ def visualize():
     return render_template('visualize.html',
                            columns=columns,
                            numeric_columns=numeric_columns,
-                           plot_content=plot_content,  # Pass the content string
-                           is_interactive=is_interactive)  # Pass the interactive flag
+                           plot_content=plot_content,
+                           is_interactive=is_interactive)
 
 
 @app.route('/download')
@@ -140,7 +195,6 @@ def download():
     if engine.df is None:
         return redirect(url_for('index'))
 
-    # Save current state to a temp file
     filename = "modified_dataset.csv"
     engine.save_data(filename)
     path = os.path.join(app.config['UPLOAD_FOLDER'], filename)

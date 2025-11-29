@@ -10,10 +10,10 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body { background-color: #f8f9fa; }
-        .sidebar { min-height: 100vh; background-color: #2c3e50; color: white; }
+        .sidebar { min-height: 100vh; background-color: #2c3e50; color: white; transition: all 0.3s; }
         .sidebar a { color: #adb5bd; text-decoration: none; padding: 10px 15px; display: block; }
         .sidebar a:hover, .sidebar a.active { background-color: #34495e; color: white; border-left: 4px solid #3498db; }
-        .main-content { padding: 20px; }
+        .main-content { padding: 20px; transition: all 0.3s; }
         .card { border: none; shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
         .stat-card { border-left: 5px solid #3498db; }
     </style>
@@ -22,8 +22,8 @@
 
 <div class="container-fluid">
     <div class="row">
-        <!-- Sidebar -->
-        <div class="col-md-2 sidebar p-0">
+        <!-- Sidebar with ID for JS manipulation -->
+        <div class="col-md-2 sidebar p-0" id="sidebar-nav">
             <h3 class="p-3 text-center border-bottom border-secondary"> <i class="fas fa-chart-line"></i> DataLab</h3>
             <div class="mt-3">
                 <a href="{{ url_for('index') }}" class="{{ 'active' if request.path == '/' else '' }}">
@@ -35,6 +35,10 @@
                 <a href="{{ url_for('cleaning') }}" class="{{ 'active' if request.path == '/cleaning' else '' }}">
                     <i class="fas fa-broom me-2"></i> Cleaning
                 </a>
+                <!-- New Transform Link -->
+                <a href="{{ url_for('transform') }}" class="{{ 'active' if request.path == '/transform' else '' }}">
+                    <i class="fas fa-exchange-alt me-2"></i> Transform
+                </a>
                 <a href="{{ url_for('visualize') }}" class="{{ 'active' if request.path == '/visualize' else '' }}">
                     <i class="fas fa-shapes me-2"></i> Visualization
                 </a>
@@ -45,8 +49,8 @@
             </div>
         </div>
 
-        <!-- Main Content -->
-        <div class="col-md-10 main-content">
+        <!-- Main Content with ID for JS manipulation -->
+        <div class="col-md-10 main-content" id="main-content-area">
             <!-- Flash Messages -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}

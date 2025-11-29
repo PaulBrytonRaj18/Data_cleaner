@@ -4,7 +4,6 @@ import matplotlib
 
 matplotlib.use('Agg')  # Use non-interactive backend for server
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import io
 import base64
@@ -122,6 +121,60 @@ class DataEngine:
         except Exception as e:
             return False, f"Error: {str(e)}"
 
+    # --- NEW METHODS FOR IMPROVEMENTS ---
+
+    def rename_column(self, old_name, new_name):
+        """Renames a specific column."""
+        if self.df is None: return False, "No data."
+        if old_name not in self.df.columns: return False, "Column not found."
+
+        try:
+            self.df.rename(columns={old_name: new_name}, inplace=True)
+            return True, f"Renamed '{old_name}' to '{new_name}'"
+        except Exception as e:
+            return False, str(e)
+
+    def get_column_unique_values(self, col, limit=50):
+        """Returns unique values for mapping previews."""
+        if self.df is None or col not in self.df.columns:
+            return []
+
+        # Get unique values, sort them, and convert to string for display
+        uniques = self.df[col].dropna().unique()
+        # Limit to avoid crashing browser with too many options
+        if len(uniques) > limit:
+            return []  # Indicate too many values
+
+        return sorted([str(x) for x in uniques])
+
+    def map_column_values(self, col, mapping_dict):
+        """Maps values in a column to new values (usually numeric)."""
+        if self.df is None or col not in self.df.columns:
+            return False, "Invalid column."
+
+        try:
+            # Create a backup for safety (optional, but good practice in memory)
+            # Apply mapping. Using .map() matches keys to values.
+            # Values not in dict become NaN, so we fillna with original or handle carefully.
+            # Here we assume user maps all relevant values.
+
+            # Convert column to string temporarily to match mapping keys coming from HTML forms
+            temp_series = self.df[col].astype(str)
+            mapped_series = temp_series.map(mapping_dict)
+
+            # If mapping creates NaNs (values not in map), decide strategy.
+            # For now, we only update rows that were mapped.
+            self.df[col] = mapped_series.fillna(self.df[col])
+
+            # Attempt to convert to numeric if possible after mapping
+            self.df[col] = pd.to_numeric(self.df[col], errors='ignore')
+
+            return True, f"Mapped values in '{col}' successfully."
+        except Exception as e:
+            return False, f"Mapping error: {str(e)}"
+
+    # ------------------------------------
+
     def visualize(self, plot_type, x_col, y_col=None, z_col=None, color_col=None,
                   title="Analysis", width=10, height=6, theme='viridis'):
         """
@@ -132,7 +185,6 @@ class DataEngine:
             return None, "No data loaded.", False
 
         # --- OPTION 1: INTERACTIVE 3D PLOT (PLOTLY) ---
-        # This fixes the "rotatable" requirement using Plotly.
         if plot_type == '3d_scatter':
             try:
                 if not x_col or not y_col or not z_col:
@@ -146,7 +198,9 @@ class DataEngine:
                     color_continuous_scale=theme
                 )
 
-                # Convert to HTML div for embedding
+                # Make it responsive
+                fig.update_layout(autosize=True, margin=dict(l=0, r=0, b=0, t=40))
+
                 plot_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
                 return plot_html, "3D Plot Generated (Interactive)", True
 
@@ -198,15 +252,11 @@ class DataEngine:
                 sns.heatmap(numeric_df.corr(), annot=True, cmap=theme, fmt=".2f")
                 plt.title("Correlation Matrix")
 
-            # --- LEGEND FIX (applies to 2D plots) ---
-            # Moves legend outside the plot area to the top right to avoid overlap.
             if color_col and plot_type != 'heatmap':
                 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
 
-            # Adjust layout so the new legend or labels aren't cut off
             plt.tight_layout()
 
-            # Save to Base64
             img = io.BytesIO()
             plt.savefig(img, format='png', bbox_inches='tight')
             img.seek(0)
