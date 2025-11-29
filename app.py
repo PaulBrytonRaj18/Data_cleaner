@@ -11,8 +11,10 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max limit
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Initialize Data Engine
-engine = DataEngine(app.config['UPLOAD_FOLDER'])
+# --- FIX: Initialize Data Engine with the ABSOLUTE path ---
+# This ensures file operations use a consistent system path (e.g., G:\Data_cleaner\uploads)
+absolute_upload_path = os.path.join(app.root_path, app.config['UPLOAD_FOLDER'])
+engine = DataEngine(absolute_upload_path)
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -29,8 +31,11 @@ def index():
 
         if file and file.filename.endswith('.csv'):
             filename = secure_filename(file.filename)
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
+            # Use the calculated absolute path for initial file save
+            file.save(os.path.join(absolute_upload_path, filename))
+
+            # The engine now only needs the filename, as it knows the base path
             success, msg = engine.load_data(filename)
             if success:
                 flash('File uploaded and analyzed successfully!', 'success')
@@ -94,7 +99,6 @@ def cleaning():
     return render_template('cleaning.html', columns=columns, numeric_columns=numeric_columns)
 
 
-# --- NEW ROUTE FOR TRANSFORMATION (MAPPING & RENAMING) ---
 @app.route('/transform', methods=['GET', 'POST'])
 def transform():
     if engine.df is None:
@@ -118,7 +122,6 @@ def transform():
                 flash(msg, 'danger')
 
         elif action == 'fetch_values':
-            # User selected a column to map, show its values
             selected_col_for_map = request.form.get('target_col')
             unique_values = engine.get_column_unique_values(selected_col_for_map)
             if not unique_values:
@@ -126,23 +129,18 @@ def transform():
                       'warning')
 
         elif action == 'apply_mapping':
-            # User submitted the mapping form
             target_col = request.form.get('target_col')
-
-            # Construct mapping dictionary from form data
             mapping_dict = {}
-            # We iterate through keys starting with 'map_'
             for key, value in request.form.items():
                 if key.startswith('map_origin_'):
                     origin_val = key.replace('map_origin_', '')
-                    # If value is empty, we skip or map to 0? Let's assume user input is required.
                     if value.strip() != '':
                         mapping_dict[origin_val] = value
 
             success, msg = engine.map_column_values(target_col, mapping_dict)
             if success:
                 flash(msg, 'success')
-                return redirect(url_for('transform'))  # Reset state
+                return redirect(url_for('transform'))
             else:
                 flash(msg, 'danger')
 
@@ -195,11 +193,40 @@ def download():
     if engine.df is None:
         return redirect(url_for('index'))
 
-    filename = "modified_dataset.csv"
-    engine.save_data(filename)
-    path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    # 1. Get the original filename safely
+    original_name = engine.current_file if engine.current_file else 'dataset.csv'
 
-    return send_file(path, as_attachment=True)
+    # 2. Construct new filename: "original_modified.csv"
+    base_name = os.path.splitext(original_name)[0]
+    new_filename = f"{base_name}_modified.csv"
+
+    # 3. Save current state to this specific filename
+    success, msg = engine.save_data(new_filename)
+    if not success:
+        flash(f"Error saving file: {msg}", 'danger')
+        return redirect(url_for('dashboard'))
+
+    # --- FIX: Retrieve the absolute path directly from the engine ---
+    # We retrieve the path used by the engine to save the file.
+    full_path_to_file = os.path.join(engine.upload_folder, new_filename)
+
+    # 4. Send with explicit download name and DISABLE CACHING
+    try:
+        # Flask 2.0+ uses download_name
+        return send_file(
+            full_path_to_file,
+            as_attachment=True,
+            download_name=new_filename,
+            max_age=0  # Prevent caching
+        )
+    except TypeError:
+        # Fallback for older Flask versions
+        return send_file(
+            full_path_to_file,
+            as_attachment=True,
+            attachment_filename=new_filename,
+            cache_timeout=0  # Prevent caching fallback
+        )
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ import plotly.io as pio
 
 
 class DataEngine:
-    def __init__(self, upload_folder='uploads'):
+    def __init__(self, upload_folder='upload'):
         self.upload_folder = upload_folder
         self.current_file = None
         self.df = None
