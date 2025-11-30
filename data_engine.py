@@ -4,6 +4,7 @@ import matplotlib
 
 matplotlib.use('Agg')  # Use non-interactive backend for server
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import io
 import base64
@@ -13,17 +14,28 @@ import plotly.io as pio
 
 
 class DataEngine:
-    def __init__(self, upload_folder='upload'):
+    # --- FIX: Accept upload_folder as an absolute path from app.py ---
+    def __init__(self, upload_folder):
+        # upload_folder is now guaranteed to be the absolute path (e.g., G:\Data_cleaner\uploads)
         self.upload_folder = upload_folder
         self.current_file = None
         self.df = None
+        # --- NEW: Store history of mappings for display ---
+        self.applied_mappings = {}
+
+    def _get_filepath(self, filename):
+        """Helper to construct the full absolute path for any file operation."""
+        # Use os.path.join(self.upload_folder, filename) as self.upload_folder is absolute
+        return os.path.join(self.upload_folder, filename)
 
     def load_data(self, filename):
         """Loads CSV data into a Pandas DataFrame."""
         try:
-            filepath = os.path.join(self.upload_folder, filename)
+            filepath = self._get_filepath(filename)
             self.df = pd.read_csv(filepath)
             self.current_file = filename
+            # Reset mappings when a new file is loaded
+            self.applied_mappings = {}
             return True, "Data loaded successfully."
         except Exception as e:
             return False, str(e)
@@ -34,15 +46,17 @@ class DataEngine:
             return False, "No data to save."
 
         if filename:
-            save_path = os.path.join(self.upload_folder, filename)
+            save_path = self._get_filepath(filename)
         else:
-            save_path = os.path.join(self.upload_folder, self.current_file)
+            # If no filename provided, use the current file's name
+            save_path = self._get_filepath(self.current_file)
 
         try:
             self.df.to_csv(save_path, index=False)
             return True, f"File saved to {save_path}"
         except Exception as e:
-            return False, str(e)
+            # Crucial: Return the full error message for debugging
+            return False, f"Error saving file to {save_path}: {str(e)}"
 
     def get_summary(self):
         """Returns comprehensive statistics about the dataset."""
@@ -121,8 +135,6 @@ class DataEngine:
         except Exception as e:
             return False, f"Error: {str(e)}"
 
-    # --- NEW METHODS FOR IMPROVEMENTS ---
-
     def rename_column(self, old_name, new_name):
         """Renames a specific column."""
         if self.df is None: return False, "No data."
@@ -139,11 +151,9 @@ class DataEngine:
         if self.df is None or col not in self.df.columns:
             return []
 
-        # Get unique values, sort them, and convert to string for display
         uniques = self.df[col].dropna().unique()
-        # Limit to avoid crashing browser with too many options
         if len(uniques) > limit:
-            return []  # Indicate too many values
+            return []
 
         return sorted([str(x) for x in uniques])
 
@@ -153,28 +163,26 @@ class DataEngine:
             return False, "Invalid column."
 
         try:
-            # Create a backup for safety (optional, but good practice in memory)
-            # Apply mapping. Using .map() matches keys to values.
-            # Values not in dict become NaN, so we fillna with original or handle carefully.
-            # Here we assume user maps all relevant values.
-
-            # Convert column to string temporarily to match mapping keys coming from HTML forms
             temp_series = self.df[col].astype(str)
             mapped_series = temp_series.map(mapping_dict)
 
-            # If mapping creates NaNs (values not in map), decide strategy.
-            # For now, we only update rows that were mapped.
             self.df[col] = mapped_series.fillna(self.df[col])
 
-            # Attempt to convert to numeric if possible after mapping
             self.df[col] = pd.to_numeric(self.df[col], errors='ignore')
+
+            # --- NEW: Store the applied mapping for display ---
+            if col in self.applied_mappings:
+                # Update existing mapping for this column
+                self.applied_mappings[col].update(mapping_dict)
+            else:
+                # Store new mapping for this column
+                self.applied_mappings[col] = mapping_dict
 
             return True, f"Mapped values in '{col}' successfully."
         except Exception as e:
             return False, f"Mapping error: {str(e)}"
 
-    # ------------------------------------
-
+    # ... visualization methods below (unchanged) ...
     def visualize(self, plot_type, x_col, y_col=None, z_col=None, color_col=None,
                   title="Analysis", width=10, height=6, theme='viridis'):
         """
@@ -184,7 +192,6 @@ class DataEngine:
         if self.df is None:
             return None, "No data loaded.", False
 
-        # --- OPTION 1: INTERACTIVE 3D PLOT (PLOTLY) ---
         if plot_type == '3d_scatter':
             try:
                 if not x_col or not y_col or not z_col:
@@ -198,7 +205,6 @@ class DataEngine:
                     color_continuous_scale=theme
                 )
 
-                # Make it responsive
                 fig.update_layout(autosize=True, margin=dict(l=0, r=0, b=0, t=40))
 
                 plot_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
@@ -207,7 +213,6 @@ class DataEngine:
             except Exception as e:
                 return None, f"3D Plot Error: {str(e)}", False
 
-        # --- OPTION 2: STATIC 2D PLOTS (MATPLOTLIB/SEABORN) ---
         plt.figure(figsize=(width, height))
         sns.set_theme(style="whitegrid")
 

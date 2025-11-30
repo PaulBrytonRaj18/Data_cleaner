@@ -12,7 +12,6 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max limit
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- FIX: Initialize Data Engine with the ABSOLUTE path ---
-# This ensures file operations use a consistent system path (e.g., G:\Data_cleaner\uploads)
 absolute_upload_path = os.path.join(app.root_path, app.config['UPLOAD_FOLDER'])
 engine = DataEngine(absolute_upload_path)
 
@@ -144,10 +143,14 @@ def transform():
             else:
                 flash(msg, 'danger')
 
+    # --- NEW: Retrieve the mapping history ---
+    applied_mappings = engine.applied_mappings
+
     return render_template('transform.html',
                            columns=columns,
                            selected_col_for_map=selected_col_for_map,
-                           unique_values=unique_values)
+                           unique_values=unique_values,
+                           applied_mappings=applied_mappings)  # Pass the history
 
 
 @app.route('/visualize', methods=['GET', 'POST'])
@@ -206,8 +209,7 @@ def download():
         flash(f"Error saving file: {msg}", 'danger')
         return redirect(url_for('dashboard'))
 
-    # --- FIX: Retrieve the absolute path directly from the engine ---
-    # We retrieve the path used by the engine to save the file.
+    # Retrieve the path used by the engine to save the file.
     full_path_to_file = os.path.join(engine.upload_folder, new_filename)
 
     # 4. Send with explicit download name and DISABLE CACHING
