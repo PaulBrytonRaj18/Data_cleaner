@@ -1,0 +1,123 @@
+================================================================================
+SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
+Project: EnterpriseML Dashboard
+Version: 1.0.0
+Date: December 22, 2025
+Authors : * Gokulraman B
+          * Paul Bryton Raj 
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+The EnterpriseML Dashboard is a web-based, automated machine learning platform 
+designed to streamline the data preprocessing and exploratory data analysis (EDA) 
+phase of the ML pipeline. It solves the "cold start" problem in data science by 
+allowing users to ingest raw CSV data, clean missing values, apply statistical 
+transformations, and generate interactive 3D visualizations without writing code.
+
+
+2. USER INTERFACE (UI) & DELIVERABLES
+--------------------------------------------------------------------------------
+This section details the specific screens the user interacts with and the 
+tangible outputs they receive from each module.
+
+2.1 The Dashboard (Landing & Overview)
+   - UI Description: Upon uploading a file, the user is presented with a 
+     high-level command center.
+     * Metrics Cards: Three distinct cards display Total Rows, Total Columns, 
+       and Total Missing Cells.
+     * Memory Indicator: A badge showing the RAM usage of the dataset in MB.
+     * Data Preview: A scrollable table showing the first 5 rows of the 
+       dataset for quick verification.
+     * Column Analysis: A detailed table listing every column’s data type, 
+       missing value count, and unique value count.
+   
+   - User Deliverable: Immediate "Health Check" of their data. They know 
+     instantly if the data is too dirty or too large to process.
+
+2.2 The Cleaning Workbench
+   - UI Description: A split-screen interface designed for rapid sanitation.
+     * Removal Operations (Red Zone): Buttons to "Drop Rows" or "Drop Columns" 
+       that contain null values, plus a dropdown to remove specific unwanted 
+       columns.
+     * Imputation Strategy (Blue Zone): A control panel where users select a 
+       filling strategy (Mean, Zero, or Mode) and target specific columns 
+       (or all numeric columns at once).
+   
+   - User Deliverable: A sanitized dataset. Missing values are mathematically 
+     filled or removed, ensuring the code won't crash during model training.
+
+2.3 The Transformation Lab
+   - UI Description: A three-column layout for Feature Engineering.
+     * Rename: Simple form to correct confusing column headers.
+     * Encoding: A selection menu to convert text data (e.g., "Male/Female") 
+       into machine-readable numbers (e.g., 0/1) using Label, One-Hot, or 
+       Ordinal encoding.
+     * Custom Mapping: An interactive list where users can manually assign 
+       specific numbers to specific text values (e.g., mapping "Low" to 1).
+   
+   - User Deliverable: A numerically optimized dataset. Categorical text data 
+     is converted into a format compatible with ML algorithms like Regression.
+
+2.4 Interactive Visualization Studio
+   - UI Description: A comprehensive plotting interface.
+     * Sidebar Controls: Dropdowns to select Chart Type (Histogram, Scatter, 
+       Box, 3D Scatter), X-Axis, Y-Axis, Z-Axis, Color Grouping, and Theme.
+     * Main Stage: A large area rendering the generated chart.
+     * Fullscreen Mode: A dedicated button that expands the chart to cover 
+       the entire laptop screen utilizing the browser's native Fullscreen API.
+   
+   - User Deliverable: Visual insights. Users can rotate 3D plots to find 
+     clusters, zoom in on outliers, and export these images for reports.
+
+
+3. SYSTEM ARCHITECTURE
+--------------------------------------------------------------------------------
+The application follows a Monolithic MVC (Model-View-Controller) Architecture:
+
+   - View (Frontend): 
+     HTML5, Jinja2 templating, Bootstrap 5 (Responsive UI), Animate.css.
+   
+   - Controller (Backend): 
+     Flask (Python) handling routing (/upload, /clean, /visualize) and requests.
+   
+   - Model (Data Engine): 
+     A persistent Python class (DataEngine) that holds the Pandas DataFrame 
+     in memory, acting as the single source of truth.
+
+
+4. TECHNICAL SPECIFICATIONS
+--------------------------------------------------------------------------------
+   - Core Language: Python 3.10+
+   - Web Framework: Flask 3.0.0
+   - Data Manipulation: Pandas, NumPy
+   - Machine Learning: Scikit-Learn (LabelEncoder, OneHotEncoder)
+   - Visualization: Plotly (Interactive 3D), Matplotlib/Seaborn (Static 2D)
+   - Security: Werkzeug (Filename sanitization)
+
+
+5. INSTALLATION GUIDE
+--------------------------------------------------------------------------------
+1. Clone the repository:
+   git clone https://github.com/rmn_2178/Data_cleaner.git
+
+2. Create virtual environment:
+   python -m venv venv
+   source venv/bin/activate  (or venv\Scripts\activate on Windows)
+
+3. Install dependencies:
+   pip install -r requirements.txt
+
+4. Run the application:
+   python app.py
+
+5. Access via browser at http://127.0.0.1:5000/
+
+
+6. SECURITY MEASURES
+--------------------------------------------------------------------------------
+   - Input Sanitization: All file uploads are sanitized to prevent shell 
+     injection.
+   - Path Isolation: Application locks file operations to the 'uploads' 
+     directory.
+   - Session Security: Flask session cookies are signed with a secret key.

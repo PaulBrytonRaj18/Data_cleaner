@@ -1,0 +1,1127 @@
+EnterpriseML/
+│
+├── app.py                  # Main Flask application controller
+├── data_engine.py          # Logic for data processing (Pandas, Scikit-learn)
+├── requirements.txt        # List of Python dependencies
+│
+├── templates/              # HTML files for the frontend
+│   ├── base.html           # Main layout template (navbar, footer)
+│   ├── dashboard.html      # Overview page (stats, preview)
+│   ├── cleaning.html       # Data cleaning interface
+│   ├── transform.html      # Feature engineering (encoding/mapping) interface
+│   └── visualize.html      # Chart plotting interface
+│
+└── uploads/                # Directory where user CSV files are stored
+
+
+
+
+**----app.py----**
+
+import os
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from werkzeug.utils import secure_filename
+from data_engine import DataEngine
+import numpy as np
+
+app = Flask(__name__)
+app.secret_key = 'super_secret_key_ml_app'
+
+# --- PATH FIX: Create uploads directly in the current working directory ---
+BASE_DIR = os.getcwd()
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# Initialize Engine
+engine = DataEngine(app.config['UPLOAD_FOLDER'])
+
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    if request.method == 'POST':
+        if 'file' not in request.files: return redirect(request.url)
+        file = request.files['file']
+        if file.filename == '' or not file.filename.endswith('.csv'):
+            flash('Please upload a valid CSV file.', 'warning')
+            return redirect(request.url)
+
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+        success, msg = engine.load_data(filename)
+        if success:
+            flash('Dataset loaded successfully!', 'success')
+            return redirect(url_for('dashboard'))
+        else:
+            flash(f'Error: {msg}', 'danger')
+
+    return render_template('base.html')
+
+
+@app.route('/dashboard')
+def dashboard():
+    if engine.df is None: return redirect(url_for('index'))
+    return render_template('dashboard.html', summary=engine.get_summary(),
+                           preview=engine.df.head().to_html(classes='table table-striped', index=False))
+
+
+@app.route('/cleaning', methods=['GET', 'POST'])
+def cleaning():
+    if engine.df is None: return redirect(url_for('index'))
+    if request.method == 'POST':
+        action = request.form.get('action')
+        target = request.form.get('target')
+        success, msg = engine.clean_data(action, target_col=target)
+        flash(msg, 'success' if success else 'danger')
+        return redirect(url_for('cleaning'))
+
+    return render_template('cleaning.html', columns=engine.df.columns.tolist())
+
+
+@app.route('/transform', methods=['GET', 'POST'])
+def transform():
+    if engine.df is None: return redirect(url_for('index'))
+
+    unique_values = []
+    selected_col_for_map = None
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+
+        # --- 1. RENAME ---
+        if action == 'rename':
+            success, msg = engine.rename_column(request.form.get('old_name'), request.form.get('new_name'))
+            flash(msg, 'success' if success else 'danger')
+
+        # --- 2. NEW: ENCODING ---
+        elif action == 'apply_encoding':
+            col = request.form.get('target_col')
+            method = request.form.get('method')
+            success, msg = engine.apply_encoding(col, method)
+            flash(msg, 'success' if success else 'danger')
+
+        # --- 3. MAPPING (FETCH) ---
+        elif action == 'fetch_values':
+            selected_col_for_map = request.form.get('target_col')
+            unique_values = engine.get_column_unique_values(selected_col_for_map)
+
+        # --- 4. MAPPING (APPLY) ---
+        elif action == 'apply_mapping':
+            target_col = request.form.get('target_col')
+            mapping_dict = {}
+            for key, value in request.form.items():
+                if key.startswith('map_origin_') and value.strip() != '':
+                    mapping_dict[key.replace('map_origin_', '')] = value
+            success, msg = engine.map_column_values(target_col, mapping_dict)
+            flash(msg, 'success' if success else 'danger')
+            return redirect(url_for('transform'))
+
+    return render_template('transform.html', columns=engine.df.columns.tolist(),
+                           selected_col_for_map=selected_col_for_map,
+                           unique_values=unique_values,
+                           applied_mappings=engine.applied_mappings)
+
+
+@app.route('/visualize', methods=['GET', 'POST'])
+def visualize():
+    if engine.df is None: return redirect(url_for('index'))
+    plot_content, is_interactive = None, False
+
+    if request.method == 'POST':
+        content, msg, is_html = engine.visualize(
+            request.form.get('plot_type'), request.form.get('x_col'),
+            request.form.get('y_col'), request.form.get('z_col'),
+            request.form.get('color_col'), request.form.get('theme')
+        )
+        if content:
+            plot_content, is_interactive = content, is_html
+        else:
+            flash(msg, 'danger')
+
+    return render_template('visualize.html', columns=engine.df.columns.tolist(),
+                           numeric_columns=engine.df.select_dtypes(include=np.number).columns.tolist(),
+                           plot_content=plot_content, is_interactive=is_interactive)
+
+
+@app.route('/download')
+def download():
+    if engine.df is None: return redirect(url_for('index'))
+    new_name = f"clean_{engine.current_file}"
+    if engine.save_data(new_name):
+        return send_file(os.path.join(app.config['UPLOAD_FOLDER'], new_name), as_attachment=True)
+    return redirect(url_for('dashboard'))
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+
+**----data_engine.py----**
+
+import pandas as pd
+import numpy as np
+import matplotlib
+
+# Use Agg backend to prevent GUI errors on servers
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
+import base64
+import os
+import plotly.express as px
+import plotly.io as pio
+
+# Import Encoders
+from sklearn.preprocessing import LabelEncoder
+
+
+class DataEngine:
+    def __init__(self, upload_folder):
+        # We rely strictly on the passed upload_folder path
+        self.upload_folder = upload_folder
+        self.current_file = None
+        self.df = None
+        self.applied_mappings = {}
+
+    def _get_filepath(self, filename):
+        return os.path.join(self.upload_folder, filename)
+
+    def load_data(self, filename):
+        try:
+            filepath = self._get_filepath(filename)
+            self.df = pd.read_csv(filepath)
+            self.current_file = filename
+            self.applied_mappings = {}
+            return True, "Data loaded successfully."
+        except Exception as e:
+            return False, str(e)
+
+    def save_data(self, filename=None):
+        if self.df is None: return False, "No data to save."
+        if filename:
+            save_path = self._get_filepath(filename)
+        else:
+            save_path = self._get_filepath(self.current_file)
+        try:
+            self.df.to_csv(save_path, index=False)
+            return True, f"File saved to {save_path}"
+        except Exception as e:
+            return False, f"Error saving: {str(e)}"
+
+    def get_summary(self):
+        if self.df is None: return None
+        rows, cols = self.df.shape
+        memory_usage = self.df.memory_usage(deep=True).sum() / 1024 ** 2
+
+        column_stats = []
+        for col in self.df.columns:
+            dtype = str(self.df[col].dtype)
+            missing = self.df[col].isnull().sum()
+            unique = self.df[col].nunique()
+            stat = {
+                'name': col, 'dtype': dtype, 'missing': int(missing),
+                'missing_pct': round((missing / rows) * 100, 2), 'unique': unique,
+                'sample': str(self.df[col].iloc[0]) if rows > 0 else 'N/A'
+            }
+            column_stats.append(stat)
+
+        return {
+            'rows': rows, 'cols': cols, 'memory_mb': round(memory_usage, 2),
+            'columns': column_stats, 'numerical_summary': self.df.describe().to_dict()
+        }
+
+    # --- CLEANING METHODS (FIXED TO MATCH HTML ACTIONS) ---
+    def clean_data(self, strategy, target_col=None):
+        if self.df is None: return False, "No data loaded."
+        try:
+            # 1. DROP ROWS (Matches HTML 'drop_rows')
+            if strategy == 'drop_rows':
+                prev_rows = len(self.df)
+                self.df.dropna(inplace=True)
+                return True, f"Dropped {prev_rows - len(self.df)} rows with missing values."
+
+            # 2. DROP COLUMNS (Matches HTML 'drop_cols')
+            elif strategy == 'drop_cols':
+                prev_cols = len(self.df.columns)
+                self.df.dropna(axis=1, inplace=True)
+                return True, f"Dropped {prev_cols - len(self.df.columns)} columns with missing values."
+
+            # 3. DROP SPECIFIC COLUMN (Matches HTML 'drop_specific')
+            elif strategy == 'drop_specific':
+                if target_col and target_col in self.df.columns:
+                    self.df.drop(columns=[target_col], inplace=True)
+                    return True, f"Dropped column '{target_col}'."
+                else:
+                    return False, f"Column '{target_col}' not found."
+
+            # 4. IMPUTATION STRATEGIES
+            elif strategy == 'fill_mean':
+                if target_col == 'ALL_NUMERIC':
+                    cols = self.df.select_dtypes(include=np.number).columns
+                    self.df[cols] = self.df[cols].fillna(self.df[cols].mean())
+                elif target_col in self.df.columns:
+                    self.df[target_col].fillna(self.df[target_col].mean(), inplace=True)
+                return True, "Filled missing values with Mean."
+
+            elif strategy == 'fill_zero':
+                if target_col == 'ALL_NUMERIC':
+                    cols = self.df.select_dtypes(include=np.number).columns
+                    self.df[cols] = self.df[cols].fillna(0)
+                elif target_col in self.df.columns:
+                    self.df[target_col].fillna(0, inplace=True)
+                return True, "Filled missing values with Zero."
+
+            elif strategy == 'fill_mode':
+                if target_col in self.df.columns:
+                    self.df[target_col].fillna(self.df[target_col].mode()[0], inplace=True)
+                return True, "Filled missing values with Mode."
+
+            return False, f"Unknown strategy: {strategy}"
+
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+
+    def rename_column(self, old_name, new_name):
+        if self.df is None or old_name not in self.df.columns: return False, "Invalid column."
+        self.df.rename(columns={old_name: new_name}, inplace=True)
+        return True, f"Renamed {old_name} to {new_name}"
+
+    # --- ADVANCED ENCODING LOGIC ---
+    def apply_encoding(self, col, method):
+        if self.df is None or col not in self.df.columns:
+            return False, "Column not found."
+
+        try:
+            if method == 'label_encode':
+                le = LabelEncoder()
+                # Ensure data is string type for encoding
+                temp_col = self.df[col].astype(str)
+                self.df[col] = le.fit_transform(temp_col)
+                return True, f"Applied Label Encoding to '{col}'."
+
+            elif method == 'one_hot_encode':
+                # Use pandas get_dummies
+                dummies = pd.get_dummies(self.df[col], prefix=col, drop_first=False).astype(int)
+                self.df = pd.concat([self.df, dummies], axis=1)
+                self.df.drop(columns=[col], inplace=True)
+                return True, f"Applied One-Hot Encoding to '{col}'. Created {dummies.shape[1]} new columns."
+
+            elif method == 'ordinal_encode':
+                # Default to factorization (sorted)
+                codes, uniques = pd.factorize(self.df[col], sort=True)
+                self.df[col] = codes
+                return True, f"Applied Ordinal Encoding (sorted) to '{col}'."
+
+            return False, "Unknown encoding method."
+        except Exception as e:
+            return False, f"Encoding Error: {str(e)}"
+
+    # --- MAPPING LOGIC ---
+    def get_column_unique_values(self, col, limit=50):
+        if self.df is None or col not in self.df.columns: return []
+        uniques = self.df[col].dropna().unique()
+        if len(uniques) > limit: return []
+        return sorted([str(x) for x in uniques])
+
+    def map_column_values(self, col, mapping_dict):
+        if self.df is None or col not in self.df.columns: return False, "Invalid Column"
+        try:
+            # Convert mapping values
+            self.df[col] = self.df[col].astype(str).map(mapping_dict).fillna(self.df[col])
+            # Try converting back to numeric
+            self.df[col] = pd.to_numeric(self.df[col], errors='ignore')
+
+            if col in self.applied_mappings:
+                self.applied_mappings[col].update(mapping_dict)
+            else:
+                self.applied_mappings[col] = mapping_dict
+            return True, f"Mapped values for {col}."
+        except Exception as e:
+            return False, str(e)
+
+    # --- VISUALIZATION LOGIC ---
+    def visualize(self, plot_type, x_col, y_col=None, z_col=None, color_col=None, theme='viridis'):
+        if self.df is None: return None, "No data.", False
+        try:
+            # 3D Plotly
+            if plot_type == '3d_scatter':
+                if not x_col or not y_col or not z_col:
+                    return None, "X, Y, and Z axes are required for 3D plots.", False
+
+                fig = px.scatter_3d(self.df, x=x_col, y=y_col, z=z_col, color=color_col, template='plotly_white',
+                                    color_continuous_scale=theme)
+                return pio.to_html(fig, full_html=False), "Success", True
+
+            # Matplotlib/Seaborn
+            plt.figure(figsize=(10, 6))
+            sns.set_theme(style="whitegrid")
+
+            if plot_type == 'histogram':
+                sns.histplot(data=self.df, x=x_col, kde=True, hue=color_col, palette=theme if color_col else None)
+            elif plot_type == 'scatter':
+                sns.scatterplot(data=self.df, x=x_col, y=y_col, hue=color_col, palette=theme if color_col else None)
+            elif plot_type == 'line':
+                sns.lineplot(data=self.df, x=x_col, y=y_col, hue=color_col, palette=theme if color_col else None)
+            elif plot_type == 'bar':
+                sns.barplot(data=self.df.head(20), x=x_col, y=y_col, hue=color_col,
+                            palette=theme if color_col else None)
+            elif plot_type == 'box':
+                sns.boxplot(data=self.df, x=x_col, y=y_col, hue=color_col, palette=theme if color_col else None)
+            elif plot_type == 'heatmap':
+                num = self.df.select_dtypes(include=[np.number])
+                sns.heatmap(num.corr(), annot=True, cmap=theme)
+
+            plt.tight_layout()
+            img = io.BytesIO()
+            plt.savefig(img, format='png')
+            img.seek(0)
+            plt.close()
+            return base64.b64encode(img.getvalue()).decode(), "Success", False
+        except Exception as e:
+            plt.close()
+            return None, str(e), False
+
+
+
+├── templates/             
+    ├── base.html          
+    ├── dashboard.html     
+    ├── cleaning.html      
+    ├── transform.html     
+    └── visualize.html 
+
+
+
+**----base.html---**
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnterpriseML Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+
+    <style>
+        body {
+            background-color: #f0f2f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Sidebar Gradient & Styling */
+        .sidebar {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #2c3e50 0%, #1a252f 100%);
+            color: white;
+            transition: all 0.3s;
+        }
+
+        /* Sidebar Links Animation */
+        .sidebar a {
+            color: #adb5bd;
+            text-decoration: none;
+            padding: 12px 20px;
+            display: block;
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+        }
+
+        .sidebar a:hover, .sidebar a.active {
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+            border-left: 4px solid #3498db;
+            padding-left: 25px; /* Slide effect */
+        }
+
+        .main-content {
+            padding: 25px;
+            transition: all 0.3s;
+        }
+
+        /* Card Hover Effects */
+        .card {
+            border: none;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            border-radius: 12px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        }
+
+        .stat-card {
+            border-left: 5px solid #3498db;
+        }
+
+        .btn {
+            transition: all 0.2s;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar p-0" id="sidebar-nav">
+            <h3 class="p-4 text-center border-bottom border-secondary fw-bold">
+                <i class="fas fa-brain text-info"></i> DataLab
+            </h3>
+            <div class="mt-3">
+                <a href="{{ url_for('index') }}" class="{{ 'active' if request.path == '/' else '' }}">
+                    <i class="fas fa-upload me-2"></i> Upload
+                </a>
+                <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.path == '/dashboard' else '' }}">
+                    <i class="fas fa-chart-bar me-2"></i> Analytics
+                </a>
+                <a href="{{ url_for('cleaning') }}" class="{{ 'active' if request.path == '/cleaning' else '' }}">
+                    <i class="fas fa-broom me-2"></i> Cleaning
+                </a>
+                <a href="{{ url_for('transform') }}" class="{{ 'active' if request.path == '/transform' else '' }}">
+                    <i class="fas fa-magic me-2"></i> Transform
+                </a>
+                <a href="{{ url_for('visualize') }}" class="{{ 'active' if request.path == '/visualize' else '' }}">
+                    <i class="fas fa-eye me-2"></i> Visualize
+                </a>
+                <hr class="border-secondary mx-3">
+                <a href="{{ url_for('download') }}" class="text-success fw-bold">
+                    <i class="fas fa-file-export me-2"></i> Export CSV
+                </a>
+            </div>
+        </div>
+
+        <div class="col-md-10 main-content" id="main-content-area">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show animate__animated animate__fadeInDown shadow-sm" role="alert">
+                            {% if category == 'success' %}
+                                <i class="fas fa-check-circle me-2"></i>
+                            {% elif category == 'danger' %}
+                                <i class="fas fa-exclamation-circle me-2"></i>
+                            {% endif %}
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}
+            <div class="d-flex justify-content-center align-items-center" style="height: 80vh;">
+                <div class="card p-5 text-center shadow-lg animate__animated animate__zoomIn">
+                    <h1 class="mb-4 display-5 fw-bold">Welcome to EnterpriseML</h1>
+                    <p class="text-muted mb-4 lead">
+                        Upload a CSV file to begin automated analysis, cleaning, and encoding.
+                    </p>
+                    <form action="/" method="post" enctype="multipart/form-data">
+                        <div class="mb-4">
+                            <input class="form-control form-control-lg border-primary" type="file" name="file" accept=".csv" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg w-100 shadow-sm">
+                            <i class="fas fa-rocket me-2"></i> Launch Analysis
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endblock %}
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+
+
+**----cleaning.html----**
+
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4 animate__animated animate__fadeInLeft"><i class="fas fa-broom text-success"></i> Data Cleaning Workbench</h2>
+
+<div class="row">
+    <div class="col-md-6 animate__animated animate__fadeInUp">
+        <div class="card h-100">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-trash-alt me-2"></i> Removal Operations</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">Remove incomplete data structures permanently.</p>
+
+                <form method="POST" class="mb-3 d-flex justify-content-between align-items-center">
+                    <input type="hidden" name="action" value="drop_rows">
+                    <span>Drop <strong>Rows</strong> with any missing values</span>
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Apply</button>
+                </form>
+                <hr>
+
+                <form method="POST" class="mb-3 d-flex justify-content-between align-items-center">
+                    <input type="hidden" name="action" value="drop_cols">
+                    <span>Drop <strong>Columns</strong> with any missing values</span>
+                    <button type="submit" class="btn btn-outline-danger btn-sm">Apply</button>
+                </form>
+                <hr>
+
+                <form method="POST" class="row g-2 align-items-center">
+                    <input type="hidden" name="action" value="drop_specific">
+                    <div class="col-8">
+                        <select name="target" class="form-select">
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-4">
+                        <button type="submit" class="btn btn-danger w-100">Drop Col</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 animate__animated animate__fadeInUp" style="animation-delay: 0.1s;">
+        <div class="card h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-fill-drip me-2"></i> Imputation (Filling)</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">Fill missing values using statistical strategies.</p>
+
+                <div class="alert alert-info py-2 small">
+                    <i class="fas fa-info-circle"></i> 'All Numeric Columns' auto-targets valid numeric fields.
+                </div>
+
+                <form method="POST" class="mb-4">
+                    <label class="form-label fw-bold">Select Strategy</label>
+                    <div class="input-group">
+                        <select name="action" class="form-select" id="fillStrategy">
+                            <option value="fill_mean">Fill with Mean (Average)</option>
+                            <option value="fill_zero">Fill with Zero (0)</option>
+                            <option value="fill_mode">Fill with Mode (Most Frequent)</option>
+                        </select>
+
+                        <select name="target" class="form-select">
+                            <option value="ALL_NUMERIC">-- All Numeric Columns --</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+
+                        <button type="submit" class="btn btn-primary">Apply</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+**----dashboard.html----**
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="fas fa-tachometer-alt text-primary"></i> Data Overview</h2>
+    <span class="badge bg-secondary">Memory: {{ summary.memory_mb }} MB</span>
+</div>
+
+<!-- Key Metrics Row -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card p-3">
+            <h6 class="text-muted">Total Rows</h6>
+            <h3>{{ summary.rows }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card p-3" style="border-left-color: #2ecc71;">
+            <h6 class="text-muted">Total Columns</h6>
+            <h3>{{ summary.cols }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card p-3" style="border-left-color: #e74c3c;">
+            <h6 class="text-muted">Total Missing Cells</h6>
+            {% set total_missing = summary.columns | sum(attribute='missing') %}
+            <h3>{{ total_missing }}</h3>
+        </div>
+    </div>
+</div>
+
+<!-- Detailed Analysis -->
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Column Analysis (Defects & Types)</h5>
+            </div>
+            <div class="card-body p-0 table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Column</th>
+                            <th>Type</th>
+                            <th>Missing</th>
+                            <th>Unique</th>
+                            <th>Sample</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for col in summary.columns %}
+                        <tr class="{{ 'table-danger' if col.missing > 0 else '' }}">
+                            <td><strong>{{ col.name }}</strong></td>
+                            <td><span class="badge bg-info text-dark">{{ col.dtype }}</span></td>
+                            <td>
+                                {{ col.missing }}
+                                <span class="small text-muted">({{ col.missing_pct }}%)</span>
+                            </td>
+                            <td>{{ col.unique }}</td>
+                            <td class="text-truncate" style="max-width: 150px;">{{ col.sample }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Numerical Summary</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">Statistical breakdown of numeric columns.</p>
+                <div style="max-height: 400px; overflow-y: auto;">
+                    {% for key, stats in summary.numerical_summary.items() %}
+                        <div class="mb-3 border-bottom pb-2">
+                            <h6 class="text-primary">{{ key }}</h6>
+                            <div class="d-flex justify-content-between small">
+                                <span>Mean: {{ "%.2f"|format(stats['mean']) }}</span>
+                                <span>Std: {{ "%.2f"|format(stats['std']) }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span>Min: {{ "%.2f"|format(stats['min']) }}</span>
+                                <span>Max: {{ "%.2f"|format(stats['max']) }}</span>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header bg-white">
+        <h5>Data Preview (First 5 Rows)</h5>
+    </div>
+    <div class="card-body table-responsive">
+        {{ preview | safe }}
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+**----transform.html----**
+
+{% extends "base.html" %}
+
+{% block content %}
+<h2 class="mb-4 animate__animated animate__fadeInLeft"><i class="fas fa-magic text-info"></i> Feature Engineering</h2>
+
+<div class="row">
+    <div class="col-md-3 animate__animated animate__fadeInUp">
+        <div class="card h-100">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-tag me-2"></i>Rename</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="action" value="rename">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">Target Column</label>
+                        <select name="old_name" class="form-select">
+                            {% for col in columns %}<option value="{{ col }}">{{ col }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small">New Name</label>
+                        <input type="text" name="new_name" class="form-control" placeholder="New Label" required>
+                    </div>
+                    <button type="submit" class="btn btn-dark w-100">Rename Column</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-5 animate__animated animate__fadeInUp" style="animation-delay: 0.1s;">
+        <div class="card h-100 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-code-branch me-2"></i>Categorical Encoding</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">Convert text data into numbers for Machine Learning.</p>
+
+                <form method="POST">
+                    <input type="hidden" name="action" value="apply_encoding">
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Select Categorical Column</label>
+                        <select name="target_col" class="form-select form-select-lg">
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Encoding Method</label>
+                        <div class="list-group">
+                            <label class="list-group-item">
+                                <input class="form-check-input me-1" type="radio" name="method" value="label_encode" checked>
+                                <strong>Label Encoding</strong>
+                                <div class="small text-muted ms-4">Assigns a unique integer (0, 1, 2...) to each category. Good for Ordinal data.</div>
+                            </label>
+                            <label class="list-group-item">
+                                <input class="form-check-input me-1" type="radio" name="method" value="one_hot_encode">
+                                <strong>One-Hot Encoding</strong>
+                                <div class="small text-muted ms-4">Creates binary columns for every category. Good for Nominal data (No order).</div>
+                            </label>
+                            <label class="list-group-item">
+                                <input class="form-check-input me-1" type="radio" name="method" value="ordinal_encode">
+                                <strong>Auto Ordinal (Sorted)</strong>
+                                <div class="small text-muted ms-4">Assigns integers based on alphabetical order.</div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 py-2">
+                        <i class="fas fa-cogs me-2"></i> Apply Encoding
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4 animate__animated animate__fadeInUp" style="animation-delay: 0.2s;">
+        <div class="card h-100">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-list-ol me-2"></i>Custom Map</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Manually define order (e.g., Low=1, High=2).</p>
+
+                <form method="POST" class="row g-2 mb-3">
+                    <input type="hidden" name="action" value="fetch_values">
+                    <div class="col-8">
+                        <select name="target_col" class="form-select">
+                            {% for col in columns %}
+                            <option value="{{ col }}" {% if col == selected_col_for_map %}selected{% endif %}>{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-4">
+                        <button type="submit" class="btn btn-outline-success w-100">Load</button>
+                    </div>
+                </form>
+
+                {% if unique_values %}
+                    <form method="POST">
+                        <input type="hidden" name="action" value="apply_mapping">
+                        <input type="hidden" name="target_col" value="{{ selected_col_for_map }}">
+
+                        <div class="bg-light p-2 rounded border mb-3" style="max-height: 250px; overflow-y: auto;">
+                            {% for val in unique_values %}
+                            <div class="input-group input-group-sm mb-2">
+                                <span class="input-group-text w-50 text-truncate" title="{{ val }}">{{ val }}</span>
+                                <input type="number" name="map_origin_{{ val }}" class="form-control" placeholder="{{ loop.index0 }}">
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Apply Custom Map</button>
+                    </form>
+                {% elif selected_col_for_map %}
+                    <div class="alert alert-warning small">Too many unique values or empty.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+**----visualise.html----**
+
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* --- FULLSCREEN --- */
+
+    /* 1. Container: Switch to block display in fullscreen.
+       This removes Flexbox constraints that prevent expansion. */
+    :fullscreen #plot-card-body {
+        background-color: white;
+        display: block !important;
+        height: 100vh !important;
+        width: 100vw !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+    }
+
+    /* Safari support */
+    :-webkit-full-screen #plot-card-body {
+        background-color: white;
+        display: block !important;
+        height: 100vh !important;
+        width: 100vw !important;
+    }
+
+    /* 2. PLOTLY CHART (Interactive): Force strictly 100% dimensions */
+    :fullscreen .plotly-graph-div {
+        height: 100vh !important;
+        width: 100vw !important;
+        max-height: none !important;
+    }
+
+    :fullscreen .main-svg {
+        background: transparent !important;
+    }
+
+    /* 3. STATIC IMAGES (Matplotlib): Center and Scale */
+    :fullscreen img {
+        display: block;
+        margin: auto;
+        height: auto !important;
+        width: auto !important;
+        max-height: 95vh !important;
+        max-width: 95vw !important;
+        position: relative;
+        top: 50%;
+        transform: translateY(-50%); /* Vertically center the image */
+        object-fit: contain;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0"><i class="fas fa-chart-pie text-warning"></i> Interactive Visualization</h2>
+    <button class="btn btn-outline-dark" onclick="toggleBrowserFullscreen()">
+        <i class="fas fa-expand me-2"></i> Full Laptop Screen
+    </button>
+</div>
+
+<div class="row">
+    <div class="col-md-3 animate__animated animate__fadeInLeft" id="plot-controls">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-sliders-h me-2"></i>Plot Settings</h5>
+            </div>
+            <div class="card-body bg-white">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted">CHART TYPE</label>
+                        <select name="plot_type" class="form-select" id="plotType" onchange="toggleFields()">
+                            <option value="histogram">Histogram (1D)</option>
+                            <option value="box">Box Plot (1D/2D)</option>
+                            <option value="bar">Bar Chart (2D)</option>
+                            <option value="scatter">Scatter Plot (2D)</option>
+                            <option value="line">Line Chart (2D)</option>
+                            <option value="heatmap">Correlation Heatmap</option>
+                            <option value="3d_scatter">3D Scatter Plot (Interactive)</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="xField">
+                        <label class="form-label fw-bold small text-muted">X AXIS</label>
+                        <select name="x_col" class="form-select">
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="yField">
+                        <label class="form-label fw-bold small text-muted">Y AXIS</label>
+                        <select name="y_col" class="form-select">
+                            <option value="None">None</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="zField" style="display:none;">
+                        <label class="form-label fw-bold small text-muted">Z AXIS (3D)</label>
+                        <select name="z_col" class="form-select">
+                            <option value="None">None</option>
+                            {% for col in numeric_columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="colorField">
+                        <label class="form-label fw-bold small text-muted">COLOR GROUPING</label>
+                        <select name="color_col" class="form-select">
+                            <option value="None">None</option>
+                            {% for col in columns %}
+                            <option value="{{ col }}">{{ col }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold small text-muted">THEME</label>
+                        <select name="theme" class="form-select">
+                            <option value="viridis">Viridis</option>
+                            <option value="plasma">Plasma</option>
+                            <option value="inferno">Inferno</option>
+                            <option value="magma">Magma</option>
+                            <option value="coolwarm">Coolwarm</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 shadow-sm">
+                        <i class="fas fa-paint-brush me-2"></i> Generate Plot
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-9 animate__animated animate__fadeInRight" id="plot-container">
+        <div class="card border-0 shadow-lg" style="min-height: 650px;">
+            <div class="card-body d-flex justify-content-center align-items-center bg-light p-2 position-relative" id="plot-card-body">
+
+                {% if plot_content %}
+                    {% if is_interactive %}
+                        <div class="w-100 h-100" id="plotly-wrapper">
+                            {{ plot_content | safe }}
+                        </div>
+                    {% else %}
+                        <img src="data:image/png;base64,{{ plot_content }}"
+                             class="img-fluid border shadow-sm bg-white"
+                             alt="Generated Plot"
+                             style="max-height: 70vh; width: auto; max-width: 100%;">
+                    {% endif %}
+                {% else %}
+                    <div class="text-center text-muted p-5">
+                        <i class="fas fa-chart-area fa-4x mb-3 text-secondary opacity-50"></i>
+                        <h4>No Visualization Generated</h4>
+                        <p>Select parameters on the left and click "Generate Plot".</p>
+                    </div>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. Dynamic Field Hiding
+    function toggleFields() {
+        const type = document.getElementById('plotType').value;
+        const xDiv = document.getElementById('xField');
+        const yDiv = document.getElementById('yField');
+        const zDiv = document.getElementById('zField');
+        const colorDiv = document.getElementById('colorField');
+
+        xDiv.style.display = 'block';
+        yDiv.style.display = 'block';
+        zDiv.style.display = 'none';
+        colorDiv.style.display = 'block';
+
+        if (type === 'histogram') {
+            yDiv.style.display = 'none';
+        } else if (type === 'heatmap') {
+            xDiv.style.display = 'none';
+            yDiv.style.display = 'none';
+            colorDiv.style.display = 'none';
+        } else if (type === '3d_scatter') {
+            zDiv.style.display = 'block';
+        }
+    }
+
+    // 2. HELPER: Force Plotly Resize
+    function resizePlotlyGraph() {
+        // Find the specific div class Plotly uses
+        const plotlyDiv = document.querySelector('.plotly-graph-div');
+        if (plotlyDiv) {
+            // Check if we are in fullscreen
+            if (document.fullscreenElement) {
+                // FORCE height override using inline styles (Plotly loves inline styles)
+                plotlyDiv.style.height = "100vh";
+                plotlyDiv.style.width = "100vw";
+            } else {
+                // Reset to default/auto
+                plotlyDiv.style.height = "";
+                plotlyDiv.style.width = "";
+            }
+
+            // Trigger Plotly's native resize function to recalculate the canvas
+            if (window.Plotly) {
+                Plotly.Plots.resize(plotlyDiv);
+            } else {
+                window.dispatchEvent(new Event('resize'));
+            }
+        }
+    }
+
+    // 3. Browser Fullscreen Logic
+    function toggleBrowserFullscreen() {
+        var elem = document.getElementById("plot-card-body");
+
+        if (!document.fullscreenElement) {
+            // Enter Fullscreen
+            elem.requestFullscreen().then(() => {
+                // Wait 200ms for browser transition, then resize graph
+                setTimeout(resizePlotlyGraph, 200);
+            }).catch(err => {
+                alert(`Error: ${err.message}`);
+            });
+        } else {
+            // Exit Fullscreen
+            document.exitFullscreen().then(() => {
+                setTimeout(resizePlotlyGraph, 200);
+            });
+        }
+    }
+
+    // 4. Listen for 'Esc' key or manual exit
+    document.addEventListener("fullscreenchange", function() {
+        setTimeout(resizePlotlyGraph, 200);
+    });
+
+    // Initialize fields on load
+    toggleFields();
+</script>
+{% endblock %}
+
+
+
+
+uploads - The folder which has the uploaded files     
