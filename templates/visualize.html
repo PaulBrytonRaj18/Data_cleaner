@@ -1,25 +1,72 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    /* --- FULLSCREEN FIXES --- */
+
+    /* 1. Container: Switch to block display in fullscreen.
+       This removes Flexbox constraints that prevent expansion. */
+    :fullscreen #plot-card-body {
+        background-color: white;
+        display: block !important;
+        height: 100vh !important;
+        width: 100vw !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+    }
+
+    /* Safari support */
+    :-webkit-full-screen #plot-card-body {
+        background-color: white;
+        display: block !important;
+        height: 100vh !important;
+        width: 100vw !important;
+    }
+
+    /* 2. PLOTLY CHART (Interactive): Force strictly 100% dimensions */
+    :fullscreen .plotly-graph-div {
+        height: 100vh !important;
+        width: 100vw !important;
+        max-height: none !important;
+    }
+
+    :fullscreen .main-svg {
+        background: transparent !important;
+    }
+
+    /* 3. STATIC IMAGES (Matplotlib): Center and Scale */
+    :fullscreen img {
+        display: block;
+        margin: auto;
+        height: auto !important;
+        width: auto !important;
+        max-height: 95vh !important;
+        max-width: 95vw !important;
+        position: relative;
+        top: 50%;
+        transform: translateY(-50%); /* Vertically center the image */
+        object-fit: contain;
+    }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2 class="mb-0"><i class="fas fa-chart-pie text-warning"></i> Interactive Visualization</h2>
-    <!-- Full Screen Toggle Button -->
-    <button class="btn btn-outline-dark" onclick="toggleFullscreen()">
-        <i class="fas fa-expand-arrows-alt me-2"></i> Full Screen Mode
+    <button class="btn btn-outline-dark" onclick="toggleBrowserFullscreen()">
+        <i class="fas fa-expand me-2"></i> Full Laptop Screen
     </button>
 </div>
 
 <div class="row">
-    <!-- Controls (Sidebar for plots) -->
-    <div class="col-md-3" id="plot-controls">
-        <div class="card">
+    <div class="col-md-3 animate__animated animate__fadeInLeft" id="plot-controls">
+        <div class="card border-0 shadow-sm">
             <div class="card-header bg-dark text-white">
-                <h5 class="mb-0">Plot Settings</h5>
+                <h5 class="mb-0"><i class="fas fa-sliders-h me-2"></i>Plot Settings</h5>
             </div>
-            <div class="card-body">
+            <div class="card-body bg-white">
                 <form method="POST">
                     <div class="mb-3">
-                        <label class="form-label">Chart Type</label>
+                        <label class="form-label fw-bold small text-muted">CHART TYPE</label>
                         <select name="plot_type" class="form-select" id="plotType" onchange="toggleFields()">
                             <option value="histogram">Histogram (1D)</option>
                             <option value="box">Box Plot (1D/2D)</option>
@@ -32,7 +79,7 @@
                     </div>
 
                     <div class="mb-3" id="xField">
-                        <label class="form-label">X Axis</label>
+                        <label class="form-label fw-bold small text-muted">X AXIS</label>
                         <select name="x_col" class="form-select">
                             {% for col in columns %}
                             <option value="{{ col }}">{{ col }}</option>
@@ -41,7 +88,7 @@
                     </div>
 
                     <div class="mb-3" id="yField">
-                        <label class="form-label">Y Axis</label>
+                        <label class="form-label fw-bold small text-muted">Y AXIS</label>
                         <select name="y_col" class="form-select">
                             <option value="None">None</option>
                             {% for col in columns %}
@@ -51,7 +98,7 @@
                     </div>
 
                     <div class="mb-3" id="zField" style="display:none;">
-                        <label class="form-label">Z Axis (3D only)</label>
+                        <label class="form-label fw-bold small text-muted">Z AXIS (3D)</label>
                         <select name="z_col" class="form-select">
                             <option value="None">None</option>
                             {% for col in numeric_columns %}
@@ -61,7 +108,7 @@
                     </div>
 
                     <div class="mb-3" id="colorField">
-                        <label class="form-label">Color Grouping (Hue)</label>
+                        <label class="form-label fw-bold small text-muted">COLOR GROUPING</label>
                         <select name="color_col" class="form-select">
                             <option value="None">None</option>
                             {% for col in columns %}
@@ -70,8 +117,8 @@
                         </select>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label">Theme / Color Map</label>
+                    <div class="mb-4">
+                        <label class="form-label fw-bold small text-muted">THEME</label>
                         <select name="theme" class="form-select">
                             <option value="viridis">Viridis</option>
                             <option value="plasma">Plasma</option>
@@ -81,41 +128,44 @@
                         </select>
                     </div>
 
-                    <button type="submit" class="btn btn-success w-100">
-                        <i class="fas fa-paint-brush"></i> Generate Plot
+                    <button type="submit" class="btn btn-success w-100 shadow-sm">
+                        <i class="fas fa-paint-brush me-2"></i> Generate Plot
                     </button>
                 </form>
             </div>
         </div>
     </div>
 
-    <!-- Plot Area -->
-    <div class="col-md-9" id="plot-container">
-        <div class="card" style="min-height: 600px;">
-            <div class="card-body d-flex justify-content-center align-items-center bg-light p-0">
+    <div class="col-md-9 animate__animated animate__fadeInRight" id="plot-container">
+        <div class="card border-0 shadow-lg" style="min-height: 650px;">
+            <div class="card-body d-flex justify-content-center align-items-center bg-light p-2 position-relative" id="plot-card-body">
+
                 {% if plot_content %}
                     {% if is_interactive %}
-                        <!-- Plotly 3D HTML content -->
-                        <div class="w-100 h-100">
+                        <div class="w-100 h-100" id="plotly-wrapper">
                             {{ plot_content | safe }}
                         </div>
                     {% else %}
-                        <!-- Matplotlib 2D static image (base64) -->
-                        <img src="data:image/png;base64,{{ plot_content }}" class="img-fluid border shadow-sm bg-white" alt="Generated Plot" style="max-height: 80vh; width: auto; max-width: 100%;">
+                        <img src="data:image/png;base64,{{ plot_content }}"
+                             class="img-fluid border shadow-sm bg-white"
+                             alt="Generated Plot"
+                             style="max-height: 70vh; width: auto; max-width: 100%;">
                     {% endif %}
                 {% else %}
                     <div class="text-center text-muted p-5">
-                        <i class="fas fa-chart-area fa-4x mb-3"></i>
+                        <i class="fas fa-chart-area fa-4x mb-3 text-secondary opacity-50"></i>
                         <h4>No Visualization Generated</h4>
-                        <p>Select parameters and click "Generate Plot".</p>
+                        <p>Select parameters on the left and click "Generate Plot".</p>
                     </div>
                 {% endif %}
+
             </div>
         </div>
     </div>
 </div>
 
 <script>
+    // 1. Dynamic Field Hiding
     function toggleFields() {
         const type = document.getElementById('plotType').value;
         const xDiv = document.getElementById('xField');
@@ -123,7 +173,6 @@
         const zDiv = document.getElementById('zField');
         const colorDiv = document.getElementById('colorField');
 
-        // Reset
         xDiv.style.display = 'block';
         yDiv.style.display = 'block';
         zDiv.style.display = 'none';
@@ -140,30 +189,57 @@
         }
     }
 
-    // Toggle Full Screen Functionality
-    function toggleFullscreen() {
-        // 1. Toggle the Global Sidebar (defined in base.html)
-        const sidebar = document.getElementById('sidebar-nav');
-        if(sidebar) sidebar.classList.toggle('d-none');
+    // 2. HELPER: Force Plotly Resize
+    function resizePlotlyGraph() {
+        // Find the specific div class Plotly uses
+        const plotlyDiv = document.querySelector('.plotly-graph-div');
+        if (plotlyDiv) {
+            // Check if we are in fullscreen
+            if (document.fullscreenElement) {
+                // FORCE height override using inline styles (Plotly loves inline styles)
+                plotlyDiv.style.height = "100vh";
+                plotlyDiv.style.width = "100vw";
+            } else {
+                // Reset to default/auto
+                plotlyDiv.style.height = "";
+                plotlyDiv.style.width = "";
+            }
 
-        // 2. Expand Main Content Area to Full Width (defined in base.html)
-        const mainContent = document.getElementById('main-content-area');
-        if(mainContent) {
-            mainContent.classList.toggle('col-md-10');
-            mainContent.classList.toggle('col-md-12');
+            // Trigger Plotly's native resize function to recalculate the canvas
+            if (window.Plotly) {
+                Plotly.Plots.resize(plotlyDiv);
+            } else {
+                window.dispatchEvent(new Event('resize'));
+            }
         }
-
-        // 3. Toggle the Plot Controls Sidebar (defined here)
-        const plotControls = document.getElementById('plot-controls');
-        plotControls.classList.toggle('d-none');
-
-        // 4. Expand the Plot Container to Full Width (defined here)
-        const plotContainer = document.getElementById('plot-container');
-        plotContainer.classList.toggle('col-md-9');
-        plotContainer.classList.toggle('col-md-12');
     }
 
-    // Run on load to set initial state
+    // 3. Browser Fullscreen Logic
+    function toggleBrowserFullscreen() {
+        var elem = document.getElementById("plot-card-body");
+
+        if (!document.fullscreenElement) {
+            // Enter Fullscreen
+            elem.requestFullscreen().then(() => {
+                // Wait 200ms for browser transition, then resize graph
+                setTimeout(resizePlotlyGraph, 200);
+            }).catch(err => {
+                alert(`Error: ${err.message}`);
+            });
+        } else {
+            // Exit Fullscreen
+            document.exitFullscreen().then(() => {
+                setTimeout(resizePlotlyGraph, 200);
+            });
+        }
+    }
+
+    // 4. Listen for 'Esc' key or manual exit
+    document.addEventListener("fullscreenchange", function() {
+        setTimeout(resizePlotlyGraph, 200);
+    });
+
+    // Initialize fields on load
     toggleFields();
 </script>
 {% endblock %}
