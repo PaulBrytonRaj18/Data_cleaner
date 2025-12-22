@@ -1,4 +1,4 @@
-EnterpriseML_Dashboard/
+EnterpriseML/
 │
 ├── app.py                  # Main Flask application controller
 ├── data_engine.py          # Logic for data processing (Pandas, Scikit-learn)

@@ -127,15 +127,19 @@ The application will start on `http://localhost:5000` (or the port shown in term
 ```
 Data_cleaner/
 │
-├── app.py                 # Main Flask application
-├── requirements.txt       # Python dependencies
-├── templates/             # HTML templates
-│   └── index.html
-├── static/                # CSS, JS, images
-│   ├── css/
-│   └── js/
-├── data/                  # Sample datasets (optional)
-└── README.md             # This file
+├── app.py                  # Main Flask application controller
+├── data_engine.py          # Logic for data processing (Pandas, Scikit-learn)
+├── requirements.txt        # List of Python dependencies
+│
+├── templates/              # HTML files for the frontend
+│   ├── base.html           # Main layout template (navbar, footer)
+│   ├── dashboard.html      # Overview page (stats, preview)
+│   ├── cleaning.html       # Data cleaning interface
+│   ├── transform.html      # Feature engineering (encoding/mapping) interface
+│   └── visualize.html      # Chart plotting interface
+│
+└── uploads/                # Directory where user CSV files are stored
+
 ```
 
 ## 🤝 Contributing
