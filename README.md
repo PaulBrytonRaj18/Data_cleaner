@@ -156,4 +156,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-*⭐ Star this repository if it helps you! Made with ❤️ for data enthusiasts by [rmn2178](https://github.com/rmn2178)*
+*⭐ Star this repository if it helps you! Made with ❤️ for data enthusiasts by [Gokulraman](https://github.com/rmn2178)*  and  [PaulBrytonRaj](https://github.com/PaulBrytonRaj18)
