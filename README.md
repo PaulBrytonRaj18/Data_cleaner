@@ -1,56 +1,47 @@
 # 📊 EnterpriseML Dashboard: CSV Analysis and Visualization Tool
 
-The EnterpriseML Dashboard is a robust, modular, Python-based web application built using the Flask framework. It provides a comprehensive solution for rapid data analysis, defect cleaning, and interactive visualization of CSV datasets. Designed for data scientists, analysts, and engineering teams, the tool allows users to quickly ingest raw data, identify structural problems, and derive initial insights without requiring complex local environment setup or lengthy scripting. This focus on efficiency makes it ideal for the crucial initial stages of any machine learning or data science pipeline.
+The EnterpriseML Dashboard is a robust, modular, Python-based web application built using the Flask framework. It provides a comprehensive solution for rapid data analysis, defect cleaning, and interactive visualization of CSV datasets. Designed for data scientists, analysts, and engineering teams, the tool allows users to quickly ingest raw data, identify structural problems, and derive initial insights without requiring complex local environment setup or lengthy scripting.
 
 ## ✨ Core Features and Functionality
 
-The application is engineered around three core phases of the data lifecycle: analysis, cleaning, and visualization.
+The application is engineered around three core phases of the data lifecycle: **analysis**, **cleaning**, and **visualization**.
 
 ### Data Analysis & Profiling
 
-Instantly initiates a deep scan of the uploaded CSV file. It calculates and presents comprehensive dataset statistics, including total records, number of features, memory consumption, and a per-column breakdown. This includes key metrics such as:<br><br>
+Instantly initiates a deep scan of the uploaded CSV file. It calculates and presents comprehensive dataset statistics, including total records, number of features, memory consumption, and a per-column breakdown.
 
-<ul>
-<li><strong>Missing Values:</strong> Total count and percentage of nulls (<code>NaN</code>) for every column.</li>
-<li><strong>Unique Counts:</strong> Cardinality of each feature to distinguish between continuous, discrete, and categorical data types.</li>
-<li><strong>Data Types:</strong> Identification of feature types (e.g., <code>float64</code>, <code>int64</code>, <code>object</code>).</li>
-</ul>
+- **Missing Values**: Total count and percentage of nulls (`NaN`) for every column.
+- **Unique Counts**: Cardinality of each feature to distinguish between continuous, discrete, and categorical data types.
+- **Data Types**: Identification of feature types (e.g., `float64`, `int64`, `object`).
 
 ### Defect Detection and Reporting
 
-The integrated dashboard provides immediate visibility into data quality issues.<br><br>
+The integrated dashboard provides immediate visibility into data quality issues.
 
-<ul>
-<li><strong>Missing Value Flagging:</strong> Columns containing any missing values are prominently highlighted (e.g., color-coded in red) on the dashboard table, allowing analysts to prioritize their cleaning efforts.</li>
-</ul>
+- **Missing Value Flagging**: Columns containing any missing values are prominently highlighted (e.g., color-coded in red) on the dashboard table, allowing analysts to prioritize their cleaning efforts.
 
 ### Data Cleaning and Transformation
 
-Offers robust, one-click options to handle defects and prepare the data for modeling:<br><br>
+Offers robust, one-click options to handle defects and prepare the data for modeling:
 
-<ul>
-<li><strong>Missing Data Removal:</strong> Users can choose to either <strong>Drop rows</strong> where any column contains a null value, resulting in a cleaner but smaller dataset, or <strong>Drop columns</strong> that contain any missing data, useful when features are too sparse.</li>
-<li><strong>Imputation Strategies:</strong> For filling missing data:
-<ul>
-<li><strong>Numeric Imputation:</strong> Missing numeric values can be filled strategically using statistical measures like the <strong>Mean (Average)</strong> for central tendency, or by substituting with <strong>Zero (0)</strong>, which is useful when nulls represent the absence of a measurement.</li>
-<li><strong>Categorical Imputation:</strong> Missing values in object or string columns can be reliably imputed using the **Mode** (Most Frequent Value).</li>
-</ul>
-</li>
-</ul>
+- **Missing Data Removal**:
+  - **Drop rows** where any column contains a null value, resulting in a cleaner but smaller dataset
+  - **Drop columns** that contain any missing data, useful when features are too sparse
+- **Imputation Strategies**:
+  - **Numeric Imputation**: Missing numeric values filled using **Mean (Average)** or **Zero (0)**
+  - **Categorical Imputation**: Missing values in object/string columns filled using **Mode** (Most Frequent Value)
 
 ### Interactive Visualization
 
-The visualization workbench allows users to explore relationships between features using a variety of industry-standard plots, including:<br><br>
+The visualization workbench allows users to explore relationships between features:
 
-<ul>
-<li><strong>Distribution Plots:</strong> Histograms and Box Plots for univariate analysis.</li>
-<li><strong>Relational Plots:</strong> Scatter plots and Line charts for bivariate analysis.</li>
-<li><strong>Structural Plots:</strong> Correlation **Heatmaps** for quickly visualizing linear relationships between all numeric features. The legend for all Matplotlib/Seaborn plots is carefully positioned outside the plot area to prevent masking the data points.</li>
-</ul>
+- **Distribution Plots**: Histograms and Box Plots for univariate analysis
+- **Relational Plots**: Scatter plots and Line charts for bivariate analysis  
+- **Structural Plots**: Correlation **Heatmaps** for numeric feature relationships (legend positioned outside plot area)
 
 ### Rotatable 3D Plotting (Interactive)
 
-For datasets with three or more numerical features, the application switches to **Plotly** to generate fully interactive, web-compatible 3D scatter plots. This allows users to click, drag, and rotate the plot in real-time within the browser, providing a much deeper understanding of spatial data clustering and relationships than static images can offer.
+For datasets with three or more numerical features, the application switches to Plotly to generate fully interactive, web-compatible 3D scatter plots. This allows users to click, drag, and rotate the plot in real-time within the browser, providing a much deeper understanding of spatial data clustering and relationships than static images can offer.
 
 ### Data Export
 
@@ -58,10 +49,107 @@ After performing cleaning and imputation steps, users have the option to downloa
 
 To ensure maximum compatibility and avoid environment issues (such as the binary incompatibility errors common with bleeding-edge Python versions), it is highly recommended to use a stable Python environment.
 
-</ul>
+Ensure your environment meets the following requirements before proceeding with installation:
 
-Ensure your file structure precisely matches the following hierarchy before proceeding with installation:
-<ul>
-  <li>Python <strong>3.10</strong> or <strong>3.11</strong> (These versions guarantee the availability of pre-compiled binary wheels for the scientific stack, eliminating the need for large C++ build tools).</li>
-  <li><code>pip</code> (Python package installer)</li>
-</ul>
+- **Python 3.10 or 3.11**  
+  These versions guarantee the availability of pre-compiled binary wheels for the scientific stack, eliminating the need for large C++ build tools.
+
+- **pip**  
+  Python package installer
+
+
+## 🛠️ Installation & Setup
+
+**Prerequisites**:
+- Python **3.10** or **3.11** (recommended for binary wheel compatibility)
+- `pip` (Python package installer)
+
+Ensure your file structure matches this hierarchy before proceeding.
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/rmn2178/Data_cleaner.git
+cd Data_cleaner
+```
+
+### 2. Set Up a Virtual Environment (Recommended)
+
+**Linux/macOS:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**Windows:**
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+> **Note**: If `requirements.txt` is missing, install core libraries:
+> ```bash
+> pip install flask pandas numpy matplotlib seaborn plotly openpyxl
+> ```
+
+## 🚀 How to Run
+
+### Start the Flask Application
+
+```bash
+python app.py
+```
+*or*
+
+```bash
+python main.py
+```
+*(Replace with actual main Flask app filename - check your project files)*
+
+The application will start on `http://localhost:5000` (or the port shown in terminal).
+
+### Usage Workflow
+
+1. **Upload CSV**: Drag & drop or select your CSV file on the dashboard
+2. **Analyze**: View auto-generated statistics and data quality report
+3. **Clean**: Apply missing value treatments (drop/fill strategies)
+4. **Visualize**: Generate plots (2D/3D interactive)
+5. **Export**: Download cleaned CSV
+
+## 📂 Project Structure
+
+```
+Data_cleaner/
+│
+├── app.py                 # Main Flask application
+├── requirements.txt       # Python dependencies
+├── templates/             # HTML templates
+│   └── index.html
+├── static/                # CSS, JS, images
+│   ├── css/
+│   └── js/
+├── data/                  # Sample datasets (optional)
+└── README.md             # This file
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/new-feature`)
+3. Commit changes (`git commit -m 'Add new feature'`)
+4. Push to branch (`git push origin feature/new-feature`)
+5. Open Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+*⭐ Star this repository if it helps you! Made with ❤️ for data enthusiasts by [rmn2178](https://github.com/rmn2178)*
