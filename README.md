@@ -150,10 +150,19 @@ Data_cleaner/
 4. Push to branch (`git push origin feature/new-feature`)
 5. Open Pull Request
 
+## Current Main Contributors
+
+| Name | Role | GitHub | Instagram |
+|-----|-----|--------|--------|
+| Gokulraman | ML Engineer | [@Gokulraman](https://github.com/rmn2178) | [@rmn_2178](https://www.instagram.com/rmn_2178/)|
+| Paul Bryton Raj | Web Developer | [@PaulBrytonRaj18](https://github.com/PaulBrytonRaj18) | [@spb_raj_18](https://www.instagram.com/spb_raj_18/) |
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-*⭐ Star this repository if it helps you! Made with ❤️ for data enthusiasts by [rmn2178](https://github.com/rmn2178)*
+*⭐ Star this repository if it helps you! Made with ❤️ for data enthusiasts by [Gokulraman](https://github.com/rmn2178)*  and [PaulBrytonRaj](https://github.com/PaulBrytonRaj18)
+
+
