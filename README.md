@@ -138,7 +138,7 @@ Data_cleaner/
 │   ├── transform.html      # Feature engineering (encoding/mapping) interface
 │   └── visualize.html      # Chart plotting interface
 │
-└── uploads/                # Directory where user CSV files are stored
+└── uploads/                # Directory where user CSV files are stored as file
 
 ```
 
