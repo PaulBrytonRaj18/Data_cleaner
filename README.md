@@ -70,7 +70,7 @@ Ensure your file structure matches this hierarchy before proceeding.
 
 ```bash
 git clone https://github.com/rmn2178/Data_cleaner.git
-cd EnterpriseML
+cd Data_cleaner
 ```
 
 ### 2. Set Up a Virtual Environment (Recommended)
